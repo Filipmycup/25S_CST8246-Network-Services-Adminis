@@ -1,0 +1,65 @@
+echo =======================Start of Script======================
+echo CST8246 - Lab 2 Automated Firewall Demo Script
+echo Student: Filip Wasowicz
+echo Student Number: 041169446
+echo Date: $(date +%Y-%m-%d)
+echo
+echo Objective:
+echo "Start netcat in listening mode (port 49999)"
+echo "Use iptables to allow 172.16.31.0/24 (client network)"
+echo "Deny 172.16.30.0/24 (server network)"
+echo "Capture traffic using tcpdump on interface ens224"
+echo
+echo "Expected Results:"
+echo "Netcat shows connection from 172.16.31.102 (client)"
+echo "tcpdump captures the message sent over port 49999"
+echo "iptables confirms both allow and deny rules"
+echo
+echo ==========================================================
+
+#!/bin/bash
+# Implements firewall rules, runs nc listener, and captures traffic via tcpdump
+
+# Configuration
+SERVER_IP="172.16.30.101"          # Replace with your server's actual IP
+CLIENT_SUBNET="172.16.31.0/24"     # Client subnet to allow
+SERVER_SUBNET="172.16.30.0/24"     # Server subnet to block
+SERVICE_PORT=49999                  # Service port for demo
+INTERFACE="ens224"                 # Interface to monitor with tcpdump
+
+# Ensure root access
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root" >&2
+    exit 1
+fi
+
+# Step 1: Flush iptables and apply required rules
+echo "[Step 1] Flushing and configuring iptables rules..."
+iptables -F
+iptables -X
+iptables -t nat -F
+iptables -t nat -X
+iptables -t mangle -F
+iptables -t mangle -X
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+iptables -P OUTPUT ACCEPT
+
+# Add custom firewall rules
+echo "Applying iptables rules for client and server network access control..."
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -s $CLIENT_SUBNET -p tcp --dport $SERVICE_PORT -j ACCEPT
+iptables -A INPUT -s $SERVER_SUBNET -p tcp --dport $SERVICE_PORT -j REJECT
+
+# Save rules for persistence
+iptables-save > /etc/sysconfig/iptables
+iptables -L -n -v --line-numbers
+
+# Step 2: Start netcat listener
+echo "[Step 2] Starting netcat listener on port $SERVICE_PORT in background..."
+nc -vkl $SERVICE_PORT &
+sleep 2
+
+# Step 3: Capture traffic using tcpdump on ens224
+echo "[Step 3] Capturing traffic on $INTERFACE for server IP $SERVER_IP..."
+tcpdump -i $INTERFACE -nnvvXtttt host $SERVER_IP
