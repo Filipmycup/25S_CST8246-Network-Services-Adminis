@@ -1,0 +1,174 @@
+#!/bin/bash
+# =======================Start of Script======================
+# CST8246 - Lab 2 Automated Firewall Demo Script
+# Student: Filip Wasowicz
+# Student Number: 041169446
+# Date: $(date +%Y-%m-%d)
+#
+# Objective:
+# "Start netcat in listening mode (port 49999)"
+# "Use iptables to allow 172.16.31.0/24 (client network)"
+# "Deny 172.16.30.0/24 (server network)"
+# "Capture traffic using tcpdump on interface ens224"
+#
+# "Expected Results:"
+# "Netcat shows connection from 172.16.31.102 (client)"
+# "tcpdump captures the message sent over port 49999"
+# "iptables confirms both allow and deny rules"
+# ===========================================================
+
+# Configuration variables
+SERVER_IP="172.16.30.101"          # Server IP address
+CLIENT_SUBNET="172.16.31.0/24"     # Client subnet to allow
+SERVER_SUBNET="172.16.30.0/24"     # Server subnet to block
+SERVICE_PORT=49999                  # Service port for demo
+INTERFACE="ens224"                  # Interface to monitor with tcpdump
+ALT_PORT=59999                      # Alternate port for testing
+
+# Check if running as root
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root" >&2
+    exit 1
+fi
+
+# Function to display header information
+show_header() {
+    echo "=======================Start of Script======================"
+    echo "CST8246 - Lab 2 Automated Firewall Demo Script"
+    echo "Student: Filip Wasowicz"
+    echo "Student Number: 041169446"
+    echo "Date: $(date +%Y-%m-%d)"
+    echo
+    echo "Objective:"
+    echo "Start netcat in listening mode (port 49999)"
+    echo "Use iptables to allow 172.16.31.0/24 (client network)"
+    echo "Deny 172.16.30.0/24 (server network)"
+    echo "Capture traffic using tcpdump on interface ens224"
+    echo
+    echo "Expected Results:"
+    echo "Netcat shows connection from 172.16.31.102 (client)"
+    echo "tcpdump captures the message sent over port 49999"
+    echo "iptables confirms both allow and deny rules"
+    echo
+    echo "=========================================================="
+}
+
+# Function to display current iptables rules
+show_rules() {
+    echo -e "\nCurrent iptables rules:"
+    iptables -L -n -v --line-numbers
+}
+
+# Function to flush all rules
+flush_rules() {
+    echo -e "\nFlushing all iptables rules..."
+    iptables -F
+    iptables -X
+    iptables -t nat -F
+    iptables -t nat -X
+    iptables -t mangle -F
+    iptables -t mangle -X
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    iptables -P OUTPUT ACCEPT
+    echo "All rules flushed."
+}
+
+# Function to install required packages
+install_packages() {
+    echo -e "\nInstalling required packages..."
+    dnf install -y iptables-services
+    systemctl stop firewalld
+    systemctl disable firewalld
+    systemctl mask firewalld
+    systemctl enable iptables
+    systemctl start iptables
+    echo "Packages installed and services configured."
+}
+
+# Function to save rules for persistence
+save_rules() {
+    echo -e "\nSaving iptables rules for persistence..."
+    mkdir -p /etc/sysconfig
+    iptables-save > /etc/sysconfig/iptables
+    echo "Rules saved to /etc/sysconfig/iptables"
+}
+
+# Function to implement lab scenario
+lab_scenario() {
+    echo -e "\nImplementing Lab Scenario:"
+    echo "Allowing $CLIENT_SUBNET, blocking $SERVER_SUBNET on port $SERVICE_PORT"
+    flush_rules
+    
+    # Add custom firewall rules
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -s $CLIENT_SUBNET -p tcp --dport $SERVICE_PORT -j ACCEPT
+    iptables -A INPUT -s $SERVER_SUBNET -p tcp --dport $SERVICE_PORT -j REJECT
+    
+    show_rules
+    save_rules
+    echo "Lab scenario implemented"
+}
+
+# Function to start netcat servers for testing
+start_servers() {
+    echo -e "\nStarting Netcat servers for testing..."
+    echo "Starting server on port $SERVICE_PORT in background..."
+    nc -vkl $SERVICE_PORT &
+    echo "Starting server on port $ALT_PORT in background..."
+    nc -vkl $ALT_PORT &
+    echo "Netcat servers started. Use 'ss -tuln | grep ':$SERVICE_PORT\|:$ALT_PORT'' to verify."
+}
+
+# Function to stop netcat servers
+stop_servers() {
+    echo -e "\nStopping Netcat servers..."
+    pkill -f "nc -vkl $SERVICE_PORT"
+    pkill -f "nc -vkl $ALT_PORT"
+    echo "Netcat servers stopped."
+}
+
+# Function to capture traffic with tcpdump
+capture_traffic() {
+    echo -e "\nCapturing traffic on $INTERFACE for server IP $SERVER_IP..."
+    tcpdump -i $INTERFACE -nnvvXtttt host $SERVER_IP
+}
+
+# Main menu
+while true; do
+    clear
+    show_header
+    echo "Main Menu:"
+    echo "1. Install required packages and services"
+    echo "2. Flush all iptables rules"
+    echo "3. Show current iptables rules"
+    echo "4. Implement Lab Scenario (Allow client, block server network)"
+    echo "5. Start Netcat servers for testing"
+    echo "6. Stop Netcat servers"
+    echo "7. Capture traffic with tcpdump"
+    echo "8. Save current rules for persistence"
+    echo "0. Exit"
+    echo "=========================================================="
+    read -p "Enter your choice: " choice
+    
+    case $choice in
+        1) install_packages ;;
+        2) flush_rules ;;
+        3) show_rules ;;
+        4) lab_scenario ;;
+        5) start_servers ;;
+        6) stop_servers ;;
+        7) capture_traffic ;;
+        8) save_rules ;;
+        0) 
+            echo "Exiting..."
+            exit 0
+            ;;
+        *)
+            echo "Invalid option. Please try again."
+            sleep 2
+            ;;
+    esac
+    
+    read -p "Press [Enter] to continue..."
+done
